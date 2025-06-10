@@ -9,7 +9,7 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {                
-                git url: 'https://github.com/yunnppa/Jenkins.git', branch: 'master'
+                git url: 'git@github.com:yunnppa/Jenkins.git', branch: 'master'
             }
         }
 
