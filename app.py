@@ -14,7 +14,7 @@ class Movie:
         self.director = director
 
     def __str__(self):
-        return f"{self.title} ({self.year}) - {self.rating} ⭐️"
+        return f"{self.title} ({self.year}) - {self.rating}"
 
 # ---- Data Source ----
 class CSVDataSource:
