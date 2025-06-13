@@ -55,14 +55,15 @@ pipeline {
             steps {
                 sh '''
                 /opt/dependency-check/bin/dependency-check.sh \
-                --scan . \
-                --format HTML \
-                --project MovieRecommender \
-                --out . \
-                --failOnCVSS 8
+                    --scan . \
+                    --format HTML \
+                    --project MovieRecommender \
+                    --out . \
+                    --failOnCVSS 8
                 '''
             }
-            '''
+        }
+'''
             post {
                 always {
                     archiveArtifacts artifacts: 'dependency-check-report.html', fingerprint: true
