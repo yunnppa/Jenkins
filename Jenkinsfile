@@ -4,36 +4,31 @@ pipeline {
     environment {
         APP_PORT = '5000'
         VENV_DIR = 'venv'
+        // Define APP_URL dynamically using the APP_PORT.
+        // Assuming Jenkins agent and the application run on the same host.
+        APP_URL = "http://localhost:${APP_PORT}"
+        ZAP_REPORT_PATH = "zap_report.html" // Define a variable for the ZAP report path
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git url: 'git@github.com:yunnppa/Jenkins.git', branch: 'master'
+                // Added credentialsId back as it was present in the original log.
+                git url: 'git@github.com:yunnppa/Jenkins.git', branch: 'master', credentialsId: 'yunnppa'
             }
         }
 
-        stage('Setup Environment') {
+        stage('Setup Python Environment') { // Renamed for clarity and combined previous 'Setup Environment' and 'Install Dependencies'
             steps {
-                sh 'python3 -m venv venv'
-                sh '. venv/bin/activate && pip install -r requirements.txt'
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    python3 -m venv venv
-                    . venv/bin/activate
-                    pip install -r requirements.txt
-                '''
+                sh 'python3 -m venv ${VENV_DIR}' // Use VENV_DIR variable
+                sh '. ${VENV_DIR}/bin/activate && pip install -r requirements.txt'
             }
         }
 
         stage('Run Tests') {
             steps {
                 sh '''#!/bin/bash
-                source venv/bin/activate
+                source ${VENV_DIR}/bin/activate
                 pytest
                 '''
             }
@@ -41,42 +36,24 @@ pipeline {
 
         stage('Deploy App Locally') {
             steps {
-                sh '''
-                    pkill -f "gunicorn" || true
-                '''
-                sh '''
-                    . ${VENV_DIR}/bin/activate
-                    nohup gunicorn --bind 0.0.0.0:5000 app:app > app.log 2>&1 &
-                '''
+                // Kill any existing gunicorn process to ensure a clean start.
+                sh 'pkill -f "gunicorn" || true'
+                // Activate virtual environment and start gunicorn in the background.
+                // Redirecting output to a log file and sending to background with &
+                sh '. ${VENV_DIR}/bin/activate && nohup gunicorn --bind 0.0.0.0:${APP_PORT} app:app > app.log 2>&1 &'
+                // Add a delay to ensure the application is fully started before ZAP scans it.
+                script {
+                    echo "Waiting 15 seconds for the application to start..."
+                    sleep 15
+                }
             }
         }
 
-    //     stage('SCA Scan (Dependency-Check)') {
-    //         steps {
-    //             sh '''
-    //             /opt/dependency-check/bin/dependency-check.sh \
-    //                 --scan . \
-    //                 --format HTML \
-    //                 --project MovieRecommender \
-    //                 --out . \
-    //                 --failOnCVSS 8
-    //             '''
-    //         }
-    //     }
-
-    //         post {
-    //             always {
-    //                 archiveArtifacts artifacts: 'dependency-check-report.html', fingerprint: true
-    //             }
-    //             failure {
-    //                 echo 'Dependency-Check scan failed or found vulnerabilities!'
-    //             }
-    //         }
-    //     }
-    // }
-
         stage('DAST Scan (OWASP ZAP)') {
             steps {
+                // Execute OWASP ZAP scan.
+                // APP_URL is now defined in the environment block.
+                // ZAP_REPORT_PATH is also defined.
                 sh """
                 /opt/owasp-zap/zap.sh -cmd \\
                     -port 8090 -host 127.0.0.1 \\
@@ -89,7 +66,8 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: '**/zap_report.html', fingerprint: true
+                    // Archive the generated ZAP report.
+                    archiveArtifacts artifacts: "${ZAP_REPORT_PATH}", fingerprint: true
                 }
                 failure {
                     echo 'ZAP DAST scan failed or found vulnerabilities!'
@@ -99,11 +77,11 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh 'rm -rf venv'
+                // Stop the gunicorn process
+                sh 'pkill -f "gunicorn" || true'
+                // Remove the virtual environment
+                sh 'rm -rf ${VENV_DIR}'
             }
         }
-    }  // <-- Only ONE closing brace here for stages
-
-} // <-- And this closes the pipeline block
-
-   
+    }
+}
