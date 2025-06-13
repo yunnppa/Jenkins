@@ -50,7 +50,7 @@ pipeline {
                 '''
             }
         }
-
+'''
         stage('SCA Scan (Dependency-Check)') {
             steps {
                 sh '''
@@ -62,6 +62,7 @@ pipeline {
                 --failOnCVSS 8
                 '''
             }
+            '''
             post {
                 always {
                     archiveArtifacts artifacts: 'dependency-check-report.html', fingerprint: true
