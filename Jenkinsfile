@@ -38,7 +38,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/yunnppa/Jenkins.git' // Replace with your repo
+                git 'https://github.com/CodeInsightAcademy/DevSecOps_CICD_1.git' // Replace with your repo
             }
         }
 
@@ -50,7 +50,7 @@ pipeline {
                     pip install --upgrade pip
                     pip install safety
                     mkdir -p reports/sca
-                    safety check --full-report > reports/sca/safety.txt  true
+                    safety check --full-report > reports/sca/safety.txt || true
                 '''
             }
         }
@@ -61,7 +61,7 @@ pipeline {
                     . venv/bin/activate
                     pip install bandit
                     mkdir -p reports/sast
-                    bandit -r . -f html -o reports/sast/bandit.html  true
+                    bandit -r . -f html -o reports/sast/bandit.html || true
                 '''
             }
         }
@@ -71,7 +71,7 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     pip install -r requirements.txt
-                    pytest  true
+                    pytest || true
                 '''
             }
         }
@@ -81,7 +81,7 @@ pipeline {
             steps {
                 // Stop any existing gunicorn process if running on port 5000
                 sh '''
-                    pkill -f "gunicorn"  true
+                    pkill -f "gunicorn" || true
                 '''
                 // Start the app with gunicorn in the background, binding to port 5000
                 sh '''
@@ -90,3 +90,52 @@ pipeline {
                 '''
             }
         }
+    
+
+        // stage('DAST Scan (ZAP)') {
+        //     steps {
+        //         sh '''
+        //             docker run --rm -v $PWD:/zap/wrk --network host ghcr.io/zaproxy/zaproxy:stable \
+        //                 zap-baseline.py -t ${TARGET_URL} -r zap-report.html || true
+        //         '''
+        //     }
+        // }
+        stage('DAST Scan (ZAP)') {
+            steps {
+                script {
+                    sh '''
+                        echo "Running ZAP scan against Gunicorn app..."
+
+                        # Wait for gunicorn app to be fully started
+                        sleep 10
+
+                        # Run ZAP Baseline Scan
+                        docker run --rm \
+                            -v $PWD:/zap/wrk \
+                            --network host \
+                            ghcr.io/zaproxy/zaproxy:stable \
+                            zap-baseline.py -t http://localhost:5000 -r zap-report.html || true
+                    '''
+                }
+            }
+        }
+        
+    }
+     post {
+        always {
+             sh '''
+                pkill -f "gunicorn" || true
+            '''
+            archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reports/**/*.*', allowEmptyArchive: true
+            echo 'All reports archived and processes cleaned up.'
+        }
+    }
+
+    // post {
+    //     always {
+    //         archiveArtifacts artifacts: 'reports/**/*.*', allowEmptyArchive: true
+    //         echo 'Pipeline finished. Reports archived.'
+    //     }
+    // }
+}
