@@ -2,86 +2,91 @@ pipeline {
     agent any
 
     environment {
+        PYTHON = 'python3'
+        REPORTS_DIR = 'reports'
+        APP_URL = "http://localhost:5000"
         APP_PORT = '5000'
         VENV_DIR = 'venv'
-        // Define APP_URL dynamically using the APP_PORT.
-        // Assuming Jenkins agent and the application run on the same host.
-        APP_URL = "http://localhost:${APP_PORT}"
-        ZAP_REPORT_PATH = "zap_report.html" // Define a variable for the ZAP report path
+        ZAP_REPORT = 'zap-report.html'
+        // ZAP_REPORT_PATH = "${WORKSPACE}/zap_report.html"
+
+        FLASK_APP = "app.py"
+        
+        DEPENDENCY_CHECK_REPORT_PATH = "${WORKSPACE}/dependency-check-report.html"
+        BANDIT_REPORT_PATH = "${WORKSPACE}/bandit_report.json"
+
+        APP_IMAGE = 'flask-app'
+        CONTAINER_NAME = 'flask-app-container'       
+        TARGET_URL = "http://localhost:${APP_PORT}"
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Install Dependencies') {
             steps {
-                // Added credentialsId back as it was present in the original log.
-                git url: 'git@github.com:yunnppa/Jenkins.git', branch: 'master', credentialsId: 'yunnppa'
-            }
-        }
+                sh '''
+                    apt-get update && \
+                    apt-get install -y python3 python3-pip python3-venv git
 
-        stage('Setup Python Environment') { // Renamed for clarity and combined previous 'Setup Environment' and 'Install Dependencies'
-            steps {
-                sh 'python3 -m venv ${VENV_DIR}' // Use VENV_DIR variable
-                sh '. ${VENV_DIR}/bin/activate && pip install -r requirements.txt'
-            }
-        }
+                    python3 -m venv venv
+                    . venv/bin/activate
 
-        stage('Run Tests') {
-            steps {
-                sh '''#!/bin/bash
-                source ${VENV_DIR}/bin/activate
-                pytest
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
                 '''
             }
         }
 
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/CodeInsightAcademy/DevSecOps_CICD_1.git' // Replace with your repo
+            }
+        }
+
+        stage('SCA - Dependency Check') {
+            steps {
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install safety
+                    mkdir -p reports/sca
+                    safety check --full-report > reports/sca/safety.txt  true
+                '''
+            }
+        }
+
+        stage('SAST - Bandit Scan') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    pip install bandit
+                    mkdir -p reports/sast
+                    bandit -r . -f html -o reports/sast/bandit.html  true
+                '''
+            }
+        }
+
+        stage('Install & Unit Tests') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    pip install -r requirements.txt
+                    pytest  true
+                '''
+            }
+        }
+
+       
         stage('Deploy App Locally') {
             steps {
-                // Kill any existing gunicorn process to ensure a clean start.
-                sh 'pkill -f "gunicorn" || true'
-                // Activate virtual environment and start gunicorn in the background.
-                // Redirecting output to a log file and sending to background with &
-                sh '. ${VENV_DIR}/bin/activate && nohup gunicorn --bind 0.0.0.0:${APP_PORT} app:app > app.log 2>&1 &'
-                // Add a delay to ensure the application is fully started before ZAP scans it.
-                script {
-                    echo "Waiting 15 seconds for the application to start..."
-                    sleep 15
-                }
+                // Stop any existing gunicorn process if running on port 5000
+                sh '''
+                    pkill -f "gunicorn"  true
+                '''
+                // Start the app with gunicorn in the background, binding to port 5000
+                sh '''
+                    . ${VENV_DIR}/bin/activate
+                    nohup gunicorn --bind 0.0.0.0:5000 app:app > app.log 2>&1 &
+                '''
             }
         }
-
-        stage('DAST Scan (OWASP ZAP)') {
-            steps {
-                // Execute OWASP ZAP scan.
-                // APP_URL is now defined in the environment block.
-                // ZAP_REPORT_PATH is also defined.
-                sh """
-                /opt/owasp-zap/zap.sh -cmd \\
-                    -port 8090 -host 127.0.0.1 \\
-                    -config api.disablekey=true \\
-                    -newsession zap_scan \\
-                    -url ${APP_URL} \\
-                    -autorun \\
-                    -htmlreport ${ZAP_REPORT_PATH}
-                """
-            }
-            post {
-                always {
-                    // Archive the generated ZAP report.
-                    archiveArtifacts artifacts: "${ZAP_REPORT_PATH}", fingerprint: true
-                }
-                failure {
-                    echo 'ZAP DAST scan failed or found vulnerabilities!'
-                }
-            }
-        }
-
-        stage('Cleanup') {
-            steps {
-                // Stop the gunicorn process
-                sh 'pkill -f "gunicorn" || true'
-                // Remove the virtual environment
-                sh 'rm -rf ${VENV_DIR}'
-            }
-        }
-    }
-}
